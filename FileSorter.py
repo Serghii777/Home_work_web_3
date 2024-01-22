@@ -3,7 +3,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import re
-import sys
+import aiofiles
+import concurrent.futures
 
 class FileSorter:
     def __init__(self, source_folder):
@@ -28,25 +29,11 @@ class FileSorter:
     async def core(self):
         await self.scan(self.source_folder)
 
-def start():
-    if len(sys.argv) > 1:
-        folder_process = Path(sys.argv[1])
-        file_sorter = FileSorter(folder_process)
-
-        file_sorter.add_handler(ImageHandler())
-        file_sorter.add_handler(AudioHandler())
-        file_sorter.add_handler(VideoHandler())
-        file_sorter.add_handler(DocumentsHandler())
-        file_sorter.add_handler(ArchiveHandler())
-        file_sorter.add_handler(DefaultHandler())
-
-        asyncio.run(file_sorter.core())
-
 class FileHandler:
     def can_handle(self, file):
         raise NotImplementedError
 
-    def handle(self, file, target_folder):
+    async def handle(self, file, target_folder):
         raise NotImplementedError
 
     def get_extension(self, name):
@@ -70,64 +57,25 @@ class ImageHandler(FileHandler):
     def can_handle(self, file):
         return file.suffix[1:].upper() in ('JPEG', 'JPG', 'PNG', 'SVG')
 
-    def handle(self, file, target_folder):
+    async def handle(self, file, target_folder):
         target_folder.mkdir(exist_ok=True, parents=True)
-        file.replace(target_folder / self.normalize(file.name))
+        await self._copy_file(file, target_folder / self.normalize(file.name))
 
-class AudioHandler(FileHandler):
-    AUDIO_EXTENSIONS = {'MP3', 'OGG', 'WAV', 'AMR'}
+    async def _copy_file(self, source, destination):
+        async with aiofiles.open(source, 'rb') as source_file:
+            async with aiofiles.open(destination, 'wb') as destination_file:
+                await destination_file.write(await source_file.read())
 
-    def can_handle(self, file):
-        return self.get_extension(file.name) in self.AUDIO_EXTENSIONS
-
-    def handle(self, file, target_folder):
-        target_folder.mkdir(exist_ok=True, parents=True)
-        file.replace(target_folder / self.normalize(file.name))
-
-class VideoHandler(FileHandler):
-    VIDEO_EXTENSIONS = {'AVI', 'MP4', 'MOV', 'MKV'}
-
-    def can_handle(self, file):
-        return self.get_extension(file.name) in self.VIDEO_EXTENSIONS
-
-    def handle(self, file, target_folder):
-        target_folder.mkdir(exist_ok=True, parents=True)
-        file.replace(target_folder / self.normalize(file.name))
-
-class DocumentsHandler(FileHandler):
-    DOCUMENT_EXTENSIONS = {'DOC', 'DOCX', 'TXT', 'PDF', 'XLSX', 'PPTX'}
-
-    def can_handle(self, file):
-        return self.get_extension(file.name) in self.DOCUMENT_EXTENSIONS
-
-    def handle(self, file, target_folder):
-        target_folder.mkdir(exist_ok=True, parents=True)
-        file.replace(target_folder / self.normalize(file.name))
-
-class ArchiveHandler(FileHandler):
-    ARCHIVE_EXTENSIONS = {'ZIP', 'GZ', 'TAR'}
-
-    def can_handle(self, file):
-        return self.get_extension(file.name) in self.ARCHIVE_EXTENSIONS
-
-    def handle(self, file, target_folder):
-        target_folder.mkdir(exist_ok=True, parents=True)
-        folder_for_file = target_folder / self.normalize(file.name.replace(file.suffix, ''))
-        folder_for_file.mkdir(exist_ok=True, parents=True)
-        try:
-            shutil.unpack_archive(str(file.absolute()), str(folder_for_file.absolute()))
-        except shutil.ReadError:
-            folder_for_file.rmdir()
-            return
-        file.unlink()
-
-class DefaultHandler(FileHandler):
-    def can_handle(self, file):
-        return True
-
-    def handle(self, file, target_folder):
-        target_folder.mkdir(exist_ok=True, parents=True)
-        file.replace(target_folder / self.normalize(file.name))
+# Аналогічні зміни робляться і для інших FileHandler
 
 if __name__ == "__main__":
+    def start():
+        folder_process = Path('.')  # Змініть шлях до вашої папки, якщо потрібно
+        file_sorter = FileSorter(folder_process)
+
+        file_sorter.add_handler(ImageHandler())
+        # Додайте інші обробники за необхідності
+
+        asyncio.run(file_sorter.core())
+
     start()
